@@ -1,0 +1,35 @@
+# WAV 录音文件（太大）
+*.wav
+safe_store/
+
+# dumphfdl 源码（不是项目核心）
+dumphfdl-*/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 数据库备份（如果有）
+*.sql
+*.dump
+
+# 日志文件
+*.log
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
