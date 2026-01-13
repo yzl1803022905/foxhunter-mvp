@@ -159,6 +159,57 @@ def decode_audio_docker(wav_path):
         print(f"[!] Docker 解码过程出错: {e}")
         return []
 
+def decode_audio_native(wav_path):
+    """
+    Linux 服务器版：直接调用本地 dumphfdl 可执行文件解码
+    适用于已安装 dumphfdl 的环境
+    """
+    if not wav_path:
+        return []
+
+    print(f"[*] 正在调用 dumphfdl 解码...")
+    
+    # dumphfdl 从 WAV 文件解码的命令格式
+    cmd = [
+        "dumphfdl",
+        "--iq-file", wav_path,
+        "--sample-rate", "16000",
+        "--sample-format", "S16_LE",
+        "--centerfreq", "0",  # 录音时已经调到目标频率
+        "--output", "decoded:json:file:path=-"  # 输出到 stdout
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', timeout=30)
+        
+        msgs = []
+        for line in result.stdout.splitlines():
+            try:
+                if not line.strip().startswith("{"):
+                    continue
+                data = json.loads(line)
+                if "hfdl" in data:
+                    msgs.append(data)
+            except json.JSONDecodeError:
+                continue
+        
+        # 如果有错误输出，打印出来帮助调试
+        if result.stderr and not msgs:
+            print(f"[DEBUG] dumphfdl stderr: {result.stderr[:200]}")
+        
+        return msgs
+
+    except FileNotFoundError:
+        print("[!] 错误: 找不到 'dumphfdl' 命令，请确认已安装")
+        print("    安装方法: https://github.com/szpajder/dumphfdl")
+        return []
+    except subprocess.TimeoutExpired:
+        print("[!] dumphfdl 解码超时（30秒）")
+        return []
+    except Exception as e:
+        print(f"[!] dumphfdl 解码出错: {e}")
+        return []
+
 def save_logs(conn, host, freq, msgs):
     """数据清洗与入库"""
     if not msgs:
@@ -230,8 +281,12 @@ def worker_loop(target_node, target_freq, archive_dir):
             time.sleep(wait_fail)
             continue
 
-        # 2. 调用 Docker 解码
-        msgs = decode_audio_docker(wav_file)
+        # 2. 调用解码器（根据平台自动选择）
+        # Windows 使用 Docker，Linux 使用本地 dumphfdl
+        if os.name == 'nt':  # Windows
+            msgs = decode_audio_docker(wav_file)
+        else:  # Linux/Unix
+            msgs = decode_audio_native(wav_file)
 
         # 3. 入库
         if msgs:
@@ -269,7 +324,10 @@ def worker_loop(target_node, target_freq, archive_dir):
 # ================= 主程序循环 =================
 
 def main():
-    print("=== FoxHunter MVP (Windows Docker版) 启动 ===")
+    platform_name = "Windows Docker版" if os.name == 'nt' else "Linux Native版"
+    print(f"=== FoxHunter MVP ({platform_name}) 启动 ===")
+    print(f"[*] 检测到的平台: {os.name}")
+    print(f"[*] 解码方式: {'Docker' if os.name == 'nt' else 'Native dumphfdl'}")
     
     # 0. 启动前检查数据库连通性
     conn = get_db_connection()
