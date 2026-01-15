@@ -93,15 +93,20 @@ def record_audio(host, port, freq, duration=15):
 
     try:
         # 执行录音
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, cwd=BASE_DIR)
+        result = subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, cwd=BASE_DIR)
         
         if os.path.exists(expected_filename):
             return expected_filename
         else:
             print(f"[-] 录音文件未生成 (可能是节点忙或离线)")
             return None
-    except subprocess.CalledProcessError:
-        print(f"[-] 录音脚本连接超时或出错")
+    except subprocess.CalledProcessError as e:
+        # 打印详细错误信息帮助调试
+        if e.stderr:
+            stderr_msg = e.stderr.decode('utf-8', errors='ignore')[:200]
+            print(f"[-] 录音脚本出错: {stderr_msg}")
+        else:
+            print(f"[-] 录音脚本连接超时或出错")
         return None
     except FileNotFoundError:
         print(f"[!] 系统找不到 'python' 命令，请检查 Python 环境变量")
