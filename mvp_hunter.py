@@ -57,13 +57,13 @@ def get_db_connection():
 
 def record_audio(host, port, freq, duration=15):
     """
-    调用 kiwiclient 录制音频 (Windows 适配版)
+    调用 kiwiclient 录制 IQ 模式音频
     """
     timestamp = int(time.time())
     # 基础文件名
     base_filename = f"rec_{timestamp}_{freq}"
-    # kiwiclient 会自动加上 _{freq_khz}_usb.wav 后缀
-    expected_filename = os.path.join(BASE_DIR, f"{base_filename}_{int(freq/1000)}_usb.wav")
+    # kiwiclient IQ 模式会自动加上 _{freq_khz}_iq.wav 后缀
+    expected_filename = os.path.join(BASE_DIR, f"{base_filename}_{int(freq/1000)}_iq.wav")
 
     print(f"[*] [{host}] 正在监听 {freq/1000} kHz ...")
 
@@ -81,7 +81,7 @@ def record_audio(host, port, freq, duration=15):
         "-s", host,
         "-p", str(port),
         "-f", str(freq / 1000),  # 转换成 kHz
-        "-m", "usb",             # HFDL 必须用 USB 模式
+        "-m", "iq",              # 改用 IQ 模式
         "--station=FoxHunter",   # 伪装 ID
         "--tlimit", str(duration),
         "--filename", base_filename,
@@ -167,34 +167,59 @@ def decode_audio_docker(wav_path):
 
 def decode_audio_native(wav_path, freq):
     """
-    Linux 服务器版：直接调用本地 dumphfdl 可执行文件解码
-    适用于已安装 dumphfdl 的环境
+    Linux 服务器版：使用 sox 转换 IQ WAV 为原始数据，管道传给 dumphfdl 解码
     
     Args:
-        wav_path: WAV 文件路径
+        wav_path: IQ 模式 WAV 文件路径
         freq: 频率（Hz）
     """
     if not wav_path:
         return []
 
-    print(f"[*] 正在调用 dumphfdl 解码...")
+    print(f"[*] 正在调用 sox + dumphfdl 解码...")
     
-    # dumphfdl 从 WAV 文件解码的命令格式
-    # 需要指定频率（单位：kHz）
     freq_khz = int(freq / 1000)
-    cmd = [
-        "dumphfdl",
-        "--iq-file", wav_path,
-        "--centerfreq", str(freq_khz),  # 中心频率（kHz）
-        str(freq_khz),  # 监听频率（kHz）
-        "--output", "decoded:json:file:path=-"  # 输出到 stdout
-    ]
-
+    
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', timeout=30)
+        # 检查 sox 是否安装
+        sox_check = subprocess.run(["which", "sox"], capture_output=True)
+        if sox_check.returncode != 0:
+            print("[!] 错误: 找不到 'sox' 命令，请安装: sudo apt install sox")
+            return []
+        
+        # 启动 sox 进程：转换 WAV 为原始 IQ 数据
+        sox_proc = subprocess.Popen(
+            ["sox", wav_path, "-t", "raw", "-r", "12000", "-b", "16", "-c", "2", "-e", "signed-integer", "-"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL
+        )
+        
+        # 启动 dumphfdl 进程：从 stdin 读取 IQ 数据
+        dumphfdl_proc = subprocess.Popen(
+            [
+                "dumphfdl",
+                "--iq-file", "-",
+                "--sample-rate", "12000",
+                "--sample-format", "CS16",
+                "--centerfreq", "0",
+                "0",  # 监听频率为 0（因为录音时已调到目标频率）
+                "--output", "decoded:json:file:path=-"
+            ],
+            stdin=sox_proc.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding='utf-8'
+        )
+        
+        # 关闭 sox 的 stdout，让它可以接收 SIGPIPE
+        sox_proc.stdout.close()
+        
+        # 读取 dumphfdl 输出
+        stdout, _ = dumphfdl_proc.communicate(timeout=30)
         
         msgs = []
-        for line in result.stdout.splitlines():
+        for line in stdout.splitlines():
             try:
                 if not line.strip().startswith("{"):
                     continue
@@ -204,21 +229,21 @@ def decode_audio_native(wav_path, freq):
             except json.JSONDecodeError:
                 continue
         
-        # 如果有错误输出，打印出来帮助调试
-        if result.stderr and not msgs:
-            print(f"[DEBUG] dumphfdl stderr: {result.stderr[:200]}")
-        
         return msgs
 
-    except FileNotFoundError:
-        print("[!] 错误: 找不到 'dumphfdl' 命令，请确认已安装")
-        print("    安装方法: https://github.com/szpajder/dumphfdl")
+    except FileNotFoundError as e:
+        print(f"[!] 错误: 找不到命令 {e.filename}，请确认已安装 sox 和 dumphfdl")
         return []
     except subprocess.TimeoutExpired:
         print("[!] dumphfdl 解码超时（30秒）")
+        try:
+            dumphfdl_proc.kill()
+            sox_proc.kill()
+        except:
+            pass
         return []
     except Exception as e:
-        print(f"[!] dumphfdl 解码出错: {e}")
+        print(f"[!] 解码过程出错: {e}")
         return []
 
 def save_logs(conn, host, freq, msgs):
