@@ -177,12 +177,10 @@ def decode_audio_native(wav_path):
     print(f"[*] 正在调用 dumphfdl 解码...")
     
     # dumphfdl 从 WAV 文件解码的命令格式
+    # WAV 文件会自动读取采样率和格式，无需手动指定
     cmd = [
         "dumphfdl",
         "--iq-file", wav_path,
-        "--sample-rate", "16000",
-        "--sample-format", "S16_LE",
-        "--centerfreq", "0",  # 录音时已经调到目标频率
         "--output", "decoded:json:file:path=-"  # 输出到 stdout
     ]
 
