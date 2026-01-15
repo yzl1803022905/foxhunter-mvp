@@ -166,10 +166,14 @@ def decode_audio_docker(wav_path):
         print(f"[!] Docker 解码过程出错: {e}")
         return []
 
-def decode_audio_native(wav_path):
+def decode_audio_native(wav_path, freq):
     """
     Linux 服务器版：直接调用本地 dumphfdl 可执行文件解码
     适用于已安装 dumphfdl 的环境
+    
+    Args:
+        wav_path: WAV 文件路径
+        freq: 频率（Hz）
     """
     if not wav_path:
         return []
@@ -177,10 +181,13 @@ def decode_audio_native(wav_path):
     print(f"[*] 正在调用 dumphfdl 解码...")
     
     # dumphfdl 从 WAV 文件解码的命令格式
-    # WAV 文件会自动读取采样率和格式，无需手动指定
+    # 需要指定频率（单位：kHz）
+    freq_khz = int(freq / 1000)
     cmd = [
         "dumphfdl",
         "--iq-file", wav_path,
+        "--centerfreq", str(freq_khz),  # 中心频率（kHz）
+        str(freq_khz),  # 监听频率（kHz）
         "--output", "decoded:json:file:path=-"  # 输出到 stdout
     ]
 
@@ -291,7 +298,7 @@ def worker_loop(target_node, target_freq, archive_dir):
         if os.name == 'nt':  # Windows
             msgs = decode_audio_docker(wav_file)
         else:  # Linux/Unix
-            msgs = decode_audio_native(wav_file)
+            msgs = decode_audio_native(wav_file, freq)
 
         # 3. 入库
         if msgs:
