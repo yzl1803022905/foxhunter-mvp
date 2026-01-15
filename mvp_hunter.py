@@ -85,7 +85,6 @@ def record_audio(host, port, freq, duration=15):
         "--station=FoxHunter",   # 伪装 ID
         "--tlimit", str(duration),
         "--filename", base_filename,
-        "--resample", "16000",   # 重采样适合解码
         "--connect-timeout", "30",  # 连接超时 30 秒
         "--socket-timeout", "20",   # 数据传输超时 20 秒
         "--quiet"
